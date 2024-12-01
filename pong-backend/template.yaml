@@ -1,0 +1,478 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  UserDataScript:
+    Type: String
+    Default: |
+      #!/bin/bash
+      sudo yum update -y
+      curl -sL https://rpm.nodesource.com/setup_18.x | sudo bash -
+      sudo yum install -y nodejs
+      sudo npm install -g pm2
+      aws s3 cp s3://cloud-pong-bucket/backend/backend.zip /home/ec2-user/backend.zip
+      cd /home/ec2-user
+      unzip backend.zip
+      cd backend
+      npm install
+      pm2 start server.js
+      pm2 save
+      pm2 startup
+      
+      
+
+Resources:
+  PongGameTable:
+    Type: "AWS::DynamoDB::Table"
+    Properties:
+      TableName: "PongGame"
+      AttributeDefinitions:
+        - AttributeName: "gameCode"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "gameCode"
+          KeyType: "HASH"
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  EC2SecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "Enable SSH and HTTP access"
+      SecurityGroupIngress:
+        - IpProtocol: "tcp"
+          FromPort: "22"
+          ToPort: "22"
+          CidrIp: "0.0.0.0/0"
+        - IpProtocol: "tcp"
+          FromPort: "3001"
+          ToPort: "3001"
+          CidrIp: "0.0.0.0/0"
+
+  EC2Instance:
+    Type: "AWS::EC2::Instance"
+    Properties:
+      InstanceType: "t2.micro"
+      KeyName: "pong-kp"
+      ImageId: "ami-0ba9883b710b05ac6"
+      SecurityGroups:
+        - !Ref EC2SecurityGroup
+      IamInstanceProfile: "LabInstanceProfile"
+      UserData:
+        Fn::Base64: !Ref UserDataScript
+
+  CreateGameFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Handler: "createGame.handler"
+      Role: "arn:aws:iam::463494103018:role/LabRole"
+      Code:
+        S3Bucket: "cloud-pong-bucket"
+        S3Key: "lambda/createGame.zip"
+      Runtime: "nodejs18.x"
+      Timeout: 10
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref PongGameTable
+          EC2_PUBLIC_IP: !GetAtt EC2Instance.PublicIp
+
+  JoinGameFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Handler: "joinGame.handler"
+      Role: "arn:aws:iam::463494103018:role/LabRole"
+      Code:
+        S3Bucket: "cloud-pong-bucket"
+        S3Key: "lambda/joinGame.zip"
+      Runtime: "nodejs18.x"
+      Timeout: 10
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref PongGameTable
+          EC2_PUBLIC_IP: !GetAtt EC2Instance.PublicIp
+
+  SendInvitationFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Handler: "sendInvitation.handler"
+      Role: "arn:aws:iam::463494103018:role/LabRole"
+      Code:
+        S3Bucket: "cloud-pong-bucket"
+        S3Key: "lambda/sendInvitation.zip"
+      Runtime: "nodejs18.x"
+      Timeout: 10
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref PongGameTable
+          SNS_TOPIC_ARN: !Ref InvitationSNSTopic
+          FRONTEND_URL: !Sub "http://${FrontendBucket}.s3-website-${AWS::Region}.amazonaws.com"
+
+  ApiGatewayRestApi:
+    Type: "AWS::ApiGateway::RestApi"
+    Properties:
+      Name: "PongGameAPI"
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  ApiGatewayResourceGame:
+    Type: "AWS::ApiGateway::Resource"
+    Properties:
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: "game"
+      RestApiId: !Ref ApiGatewayRestApi
+
+  ApiGatewayResourceCreate:
+    Type: "AWS::ApiGateway::Resource"
+    Properties:
+      ParentId: !Ref ApiGatewayResourceGame
+      PathPart: "create"
+      RestApiId: !Ref ApiGatewayRestApi
+
+  ApiGatewayResourceJoin:
+    Type: "AWS::ApiGateway::Resource"
+    Properties:
+      ParentId: !Ref ApiGatewayResourceGame
+      PathPart: "join"
+      RestApiId: !Ref ApiGatewayRestApi
+
+  ApiGatewayResourceInvite:
+    Type: "AWS::ApiGateway::Resource"
+    Properties:
+      ParentId: !Ref ApiGatewayResourceGame
+      PathPart: "invite"
+      RestApiId: !Ref ApiGatewayRestApi
+
+  CreateGameMethod:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      AuthorizationType: "NONE"
+      HttpMethod: "POST"
+      ResourceId: !Ref ApiGatewayResourceCreate
+      RestApiId: !Ref ApiGatewayRestApi
+      Integration:
+        Type: "AWS_PROXY"
+        IntegrationHttpMethod: "POST"
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CreateGameFunction.Arn}/invocations"
+          - { Region: !Ref "AWS::Region" }
+        Credentials: "arn:aws:iam::463494103018:role/LabRole"
+
+  CreateGameOptionsMethod:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      AuthorizationType: "NONE"
+      HttpMethod: "OPTIONS"
+      ResourceId: !Ref ApiGatewayResourceCreate
+      RestApiId: !Ref ApiGatewayRestApi
+      Integration:
+        IntegrationHttpMethod: "OPTIONS"
+        PassthroughBehavior: WHEN_NO_MATCH
+        Type: "MOCK"
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: "'*'"
+            method.response.header.Access-Control-Allow-Methods: "'OPTIONS,POST'"
+            method.response.header.Access-Control-Allow-Origin: "'*'"
+
+  JoinGameMethod:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      AuthorizationType: "NONE"
+      HttpMethod: "POST"
+      ResourceId: !Ref ApiGatewayResourceJoin
+      RestApiId: !Ref ApiGatewayRestApi
+      Integration:
+        Type: "AWS_PROXY"
+        IntegrationHttpMethod: "POST"
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${JoinGameFunction.Arn}/invocations"
+          - { Region: !Ref "AWS::Region" }
+        Credentials: "arn:aws:iam::463494103018:role/LabRole"
+
+  JoinGameOptionsMethod:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      AuthorizationType: "NONE"
+      HttpMethod: "OPTIONS"
+      ResourceId: !Ref ApiGatewayResourceJoin
+      RestApiId: !Ref ApiGatewayRestApi
+      Integration:
+        IntegrationHttpMethod: "OPTIONS"
+        PassthroughBehavior: WHEN_NO_MATCH
+        Type: "MOCK"
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: "'*'"
+            method.response.header.Access-Control-Allow-Methods: "'OPTIONS,POST'"
+            method.response.header.Access-Control-Allow-Origin: "'*'"
+
+  InviteGameMethod:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      AuthorizationType: "NONE"
+      HttpMethod: "POST"
+      ResourceId: !Ref ApiGatewayResourceInvite
+      RestApiId: !Ref ApiGatewayRestApi
+      Integration:
+        Type: "AWS_PROXY"
+        IntegrationHttpMethod: "POST"
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SendInvitationFunction.Arn}/invocations"
+          - { Region: !Ref "AWS::Region" }
+        Credentials: "arn:aws:iam::463494103018:role/LabRole"
+
+  InviteGameOptionsMethod:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      AuthorizationType: "NONE"
+      HttpMethod: "OPTIONS"
+      ResourceId: !Ref ApiGatewayResourceInvite
+      RestApiId: !Ref ApiGatewayRestApi
+      Integration:
+        IntegrationHttpMethod: "OPTIONS"
+        PassthroughBehavior: WHEN_NO_MATCH
+        Type: "MOCK"
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: "'*'"
+            method.response.header.Access-Control-Allow-Methods: "'OPTIONS,POST'"
+            method.response.header.Access-Control-Allow-Origin: "'*'"
+
+  ApiGatewayDeployment:
+    Type: "AWS::ApiGateway::Deployment"
+    DependsOn:
+      - CreateGameMethod
+      - CreateGameOptionsMethod
+      - JoinGameMethod
+      - JoinGameOptionsMethod
+      - InviteGameMethod
+      - InviteGameOptionsMethod
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      StageName: deployment
+
+  EC2Instance:
+    Type: "AWS::EC2::Instance"
+    Properties:
+      InstanceType: "t2.micro"
+      KeyName: "pong-kp"
+      ImageId: "ami-0ba9883b710b05ac6"
+      SecurityGroups:
+        - !Ref EC2SecurityGroup
+      IamInstanceProfile: "LabInstanceProfile"
+      UserData:
+        Fn::Base64: !Ref UserDataScript
+
+  EC2SecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "Enable SSH and HTTP access"
+      SecurityGroupIngress:
+        - IpProtocol: "tcp"
+          FromPort: "22"
+          ToPort: "22"
+          CidrIp: "0.0.0.0/0"
+        - IpProtocol: "tcp"
+          FromPort: "3001"
+          ToPort: "3001"
+          CidrIp: "0.0.0.0/0"
+
+  InvitationSNSTopic:
+    Type: "AWS::SNS::Topic"
+    Properties:
+      DisplayName: "PongGameInvitations"
+
+
+  FrontendBucket:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      BucketName: !Sub "pong-game-frontend-${AWS::AccountId}-${AWS::Region}-${AWS::StackName}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      WebsiteConfiguration:
+        IndexDocument: "index.html"
+        ErrorDocument: "index.html"
+
+  BucketPolicy:
+    Type: "AWS::S3::BucketPolicy"
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal: "*"
+            Action: "s3:GetObject"
+            Resource: !Sub "arn:aws:s3:::pong-game-frontend-${AWS::AccountId}-${AWS::Region}-${AWS::StackName}/*"
+
+  FrontendDeployment:
+    Type: "Custom::S3Deployment"
+    Properties:
+      ServiceToken: !GetAtt S3DeploymentFunction.Arn
+      SrcBucket: "cloud-pong-bucket"
+      SrcKey: "frontend/frontend.zip"
+      DstBucket: !Ref FrontendBucket
+      DstKeyPrefix: ""
+      ApiGatewayUrl: !Sub "https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/deployment/game"
+      EC2PublicIP: !GetAtt EC2Instance.PublicIp
+      AWSRegion: !Ref "AWS::Region"
+      InvitationSNSTopicArn: !Ref InvitationSNSTopic
+
+  S3DeploymentFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Handler: "index.handler"
+      Role: "arn:aws:iam::463494103018:role/LabRole"
+      Runtime: "python3.8"
+      Timeout: 300
+      Code:
+        ZipFile: |
+          import boto3
+          import zipfile
+          import os
+          import logging
+          import json
+          import urllib3
+          from mimetypes import guess_type
+
+          s3 = boto3.client('s3')
+          sns = boto3.client('sns')
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def send_response(event, context, response_status, response_data, physical_resource_id=None):
+              response_url = event['ResponseURL']
+
+              response_body = {
+                  'Status': response_status,
+                  'Reason': 'See the details in CloudWatch Log Stream: ' + context.log_stream_name,
+                  'PhysicalResourceId': physical_resource_id or context.log_stream_name,
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'Data': response_data
+              }
+
+              json_response_body = json.dumps(response_body)
+
+              headers = {
+                  'content-type': '',
+                  'content-length': str(len(json_response_body))
+              }
+
+              try:
+                  http = urllib3.PoolManager()
+                  response = http.request('PUT', response_url, body=json_response_body, headers=headers)
+                  logger.info("CloudFormation returned status code: " + response.reason)
+              except Exception as e:
+                  logger.error("send(..) failed executing requests.put(..): " + str(e))
+
+          def handler(event, context):
+              src_bucket = event['ResourceProperties']['SrcBucket']
+              src_key = event['ResourceProperties']['SrcKey']
+              dst_bucket = event['ResourceProperties']['DstBucket']
+
+              try:
+                  logger.info("Downloading frontend.zip from S3")
+                  with open('/tmp/frontend.zip', 'wb') as f:
+                      s3.download_fileobj(src_bucket, src_key, f)
+
+                  logger.info("Extracting frontend.zip")
+                  with zipfile.ZipFile('/tmp/frontend.zip', 'r') as zip_ref:
+                      zip_ref.extractall('/tmp/frontend')
+
+                  # Update config.json
+                  config_path = '/tmp/frontend/config.json'
+                  logger.info("Updating config.json")
+          
+                  with open(config_path, 'r') as f:
+                      config = json.load(f)
+
+                  config['API_GATEWAY_URL'] = event['ResourceProperties']['ApiGatewayUrl']
+                  config['EC2_PUBLIC_IP'] = event['ResourceProperties']['EC2PublicIP']
+                  config['AWS_REGION'] = event['ResourceProperties']['AWSRegion']
+                  config['INVITATION_SNS_TOPIC_ARN'] = event['ResourceProperties']['InvitationSNSTopicArn']
+
+                  with open(config_path, 'w') as f:
+                      json.dump(config, f, indent=4)
+
+                  s3.upload_file(config_path, dst_bucket, 'config.json')
+
+                  logger.info("Uploading files to S3 bucket: %s", dst_bucket)
+                  for root, dirs, files in os.walk('/tmp/frontend'):
+                      for file in files:
+                          file_path = os.path.join(root, file)
+                          content_type = guess_type(file_path)[0] or 'binary/octet-stream'
+                          s3.upload_file(file_path, dst_bucket, os.path.relpath(file_path, '/tmp/frontend'), ExtraArgs={'ContentType': content_type})
+
+                  logger.info("S3 Deployment successful.")
+                  send_response(event, context, "SUCCESS", {"Message": "Deployment completed successfully."})
+
+              except Exception as e:
+                  logger.error("Error during S3 Deployment: %s", str(e))
+                  send_response(event, context, "FAILED", {"Message": "Deployment failed.", "Error": str(e)})
+
+  GuardDutyDetector:
+    Type: "AWS::GuardDuty::Detector"
+    Properties:
+      Enable: true
+      FindingPublishingFrequency: SIX_HOURS
+
+  GuardDutySNSTopic:
+    Type: "AWS::SNS::Topic"
+    Properties:
+      DisplayName: "GuardDutyFindings"
+
+  GuardDutySNSTopicSubscription:
+    Type: "AWS::SNS::Subscription"
+    Properties:
+      Protocol: "email"
+      Endpoint: "mh1377@gmail.com"
+      TopicArn: !Ref GuardDutySNSTopic
+
+Outputs:
+  ApiGatewayUrl:
+    Description: "URL of the API Gateway"
+    Value: !Sub "https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/deployment/game"
+    Export:
+      Name: "ApiGatewayUrl"
+
+  EC2PublicIP:
+    Description: "Public IP of the EC2 instance"
+    Value: !GetAtt EC2Instance.PublicIp
+    Export:
+      Name: "EC2PublicIP"
+
+  AWSRegion:
+    Description: "AWS Region"
+    Value: !Ref "AWS::Region"
+    Export:
+      Name: "AWSRegion"
+
+  InvitationSNSTopicArn:
+    Description: "ARN of the SNS Topic for invitations"
+    Value: !Ref InvitationSNSTopic
+
+  FrontendURL:
+    Description: "URL of the frontend application"
+    Value: !Sub "http://${FrontendBucket}.s3-website-${AWS::Region}.amazonaws.com"
+    Export:
+      Name: "FrontendURL"
+
+  GuardDutySNSTopicArn:
+    Description: "ARN of the SNS Topic for GuardDuty findings"
+    Value: !Ref GuardDutySNSTopic
+    Export:
+      Name: "GuardDutySNSTopicArn"

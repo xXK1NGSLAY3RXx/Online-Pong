@@ -1,0 +1,115 @@
+/* Game.css */
+
+body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+    font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+.game-container {
+    background-color: #282c34;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+canvas {
+    display: block;
+    margin: 20px auto;
+    border: 2px solid white;
+    box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.waiting-message {
+    text-align: center;
+    color: white;
+    font-size: 24px;
+    margin: 20px;
+}
+
+.game-code {
+    text-align: center;
+    color: green;
+    font-size: 18px;
+    margin-top: 10px;
+}
+
+.title {
+    font-size: 3em;
+    font-family: 'Comic Sans MS', 'Comic Sans', cursive;
+    margin-bottom: 20px;
+    color: #61dafb;
+}
+
+.instructions {
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    width: 80%;
+    margin: 20px;
+}
+
+.control-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.control {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 50px;
+    height: 50px;
+    margin: 5px;
+    border: 2px solid #61dafb;
+    border-radius: 5px;
+    font-size: 20px;
+    color: #61dafb;
+    font-family: 'Comic Sans MS', 'Comic Sans', cursive;
+}
+
+.controls-text {
+    font-size: 24px;
+    font-family: 'Comic Sans MS', 'Comic Sans', cursive;
+    color: #61dafb;
+    margin: 0 20px;
+}
+
+.invite-section {
+    margin-top: 20px;
+}
+
+.invite-section input, .invite-section button {
+    margin: 10px;
+    padding: 10px 20px;
+    font-size: 16px;
+    font-family: 'Comic Sans MS', 'Comic Sans', cursive;
+    color: #61dafb;
+    background-color: #282c34;
+    border: 2px solid #61dafb;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.invite-section input:hover, .invite-section button:hover {
+    background-color: #61dafb;
+    color: #282c34;
+}
+
+.invitation-status {
+    margin-top: 10px;
+    color: white;
+    font-size: 16px;
+}

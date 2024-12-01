@@ -1,0 +1,46 @@
+/* app.css */
+.App {
+  text-align: center;
+  color: white;
+  height: 100vh; /* Ensure the App component takes the full height of the viewport */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #282c34; /* Set the background color for the entire screen */
+}
+
+.menu {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background-color: #20232a;
+  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  padding: 40px; /* Increased padding for a larger menu */
+  margin: 20px;
+}
+
+button, input {
+  margin: 10px;
+  padding: 15px 20px; /* Increased padding for larger buttons */
+  font-size: 18px; /* Increased font size */
+  font-family: 'Comic Sans MS', 'Comic Sans', cursive;
+  color: #61dafb;
+  background-color: #282c34;
+  border: 2px solid #61dafb;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+button:hover, input:hover {
+  background-color: #61dafb;
+  color: #282c34;
+}
+
+.title {
+  font-size: 3em; /* Increased font size for the title */
+  font-family: 'Comic Sans MS', 'Comic Sans', cursive;
+  margin-bottom: 20px;
+  color: #61dafb;
+}

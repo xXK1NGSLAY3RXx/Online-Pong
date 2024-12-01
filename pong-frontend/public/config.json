@@ -1,0 +1,6 @@
+{
+  "API_GATEWAY_URL": "https://xxxxxxxxxx.execute-api.us-west-2.amazonaws.com/prod/game",
+  "EC2_PUBLIC_IP": "XX.XX.XX.XX",
+  "AWS_REGION": "us-west-2",
+  "INVITATION_SNS_TOPIC_ARN": "your-sns-topic-arn"
+}
