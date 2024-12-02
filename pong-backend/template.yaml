@@ -8,7 +8,7 @@ Parameters:
       curl -sL https://rpm.nodesource.com/setup_18.x | sudo bash -
       sudo yum install -y nodejs
       sudo npm install -g pm2
-      aws s3 cp s3://cloud-pong-bucket/backend/backend.zip /home/ec2-user/backend.zip
+      aws s3 cp s3://cloud-pong-bucket-new/backend/backend.zip /home/ec2-user/backend.zip
       cd /home/ec2-user
       unzip backend.zip
       cd backend
@@ -16,6 +16,11 @@ Parameters:
       pm2 start server.js
       pm2 save
       pm2 startup
+
+  AllowedSSHIp:
+    Type: String
+    Description: "The IP address range that can be used to SSH to the EC2 instances"
+    Default: "134.41.184.241/32"
       
       
 
@@ -42,7 +47,7 @@ Resources:
         - IpProtocol: "tcp"
           FromPort: "22"
           ToPort: "22"
-          CidrIp: "0.0.0.0/0"
+          CidrIp: !Ref AllowedSSHIp
         - IpProtocol: "tcp"
           FromPort: "3001"
           ToPort: "3001"
@@ -64,9 +69,9 @@ Resources:
     Type: "AWS::Lambda::Function"
     Properties:
       Handler: "createGame.handler"
-      Role: "arn:aws:iam::463494103018:role/LabRole"
+      Role: "arn:aws:iam::671569503595:role/LabRole"
       Code:
-        S3Bucket: "cloud-pong-bucket"
+        S3Bucket: "cloud-pong-bucket-new"
         S3Key: "lambda/createGame.zip"
       Runtime: "nodejs18.x"
       Timeout: 10
@@ -79,9 +84,9 @@ Resources:
     Type: "AWS::Lambda::Function"
     Properties:
       Handler: "joinGame.handler"
-      Role: "arn:aws:iam::463494103018:role/LabRole"
+      Role: "arn:aws:iam::671569503595:role/LabRole"
       Code:
-        S3Bucket: "cloud-pong-bucket"
+        S3Bucket: "cloud-pong-bucket-new"
         S3Key: "lambda/joinGame.zip"
       Runtime: "nodejs18.x"
       Timeout: 10
@@ -94,9 +99,9 @@ Resources:
     Type: "AWS::Lambda::Function"
     Properties:
       Handler: "sendInvitation.handler"
-      Role: "arn:aws:iam::463494103018:role/LabRole"
+      Role: "arn:aws:iam::671569503595:role/LabRole"
       Code:
-        S3Bucket: "cloud-pong-bucket"
+        S3Bucket: "cloud-pong-bucket-new"
         S3Key: "lambda/sendInvitation.zip"
       Runtime: "nodejs18.x"
       Timeout: 10
@@ -155,7 +160,7 @@ Resources:
         Uri: !Sub
           - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CreateGameFunction.Arn}/invocations"
           - { Region: !Ref "AWS::Region" }
-        Credentials: "arn:aws:iam::463494103018:role/LabRole"
+        Credentials: "arn:aws:iam::671569503595:role/LabRole"
 
   CreateGameOptionsMethod:
     Type: "AWS::ApiGateway::Method"
@@ -190,7 +195,7 @@ Resources:
         Uri: !Sub
           - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${JoinGameFunction.Arn}/invocations"
           - { Region: !Ref "AWS::Region" }
-        Credentials: "arn:aws:iam::463494103018:role/LabRole"
+        Credentials: "arn:aws:iam::671569503595:role/LabRole"
 
   JoinGameOptionsMethod:
     Type: "AWS::ApiGateway::Method"
@@ -225,7 +230,7 @@ Resources:
         Uri: !Sub
           - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SendInvitationFunction.Arn}/invocations"
           - { Region: !Ref "AWS::Region" }
-        Credentials: "arn:aws:iam::463494103018:role/LabRole"
+        Credentials: "arn:aws:iam::671569503595:role/LabRole"
 
   InviteGameOptionsMethod:
     Type: "AWS::ApiGateway::Method"
@@ -260,31 +265,6 @@ Resources:
       RestApiId: !Ref ApiGatewayRestApi
       StageName: deployment
 
-  EC2Instance:
-    Type: "AWS::EC2::Instance"
-    Properties:
-      InstanceType: "t2.micro"
-      KeyName: "pong-kp"
-      ImageId: "ami-0ba9883b710b05ac6"
-      SecurityGroups:
-        - !Ref EC2SecurityGroup
-      IamInstanceProfile: "LabInstanceProfile"
-      UserData:
-        Fn::Base64: !Ref UserDataScript
-
-  EC2SecurityGroup:
-    Type: "AWS::EC2::SecurityGroup"
-    Properties:
-      GroupDescription: "Enable SSH and HTTP access"
-      SecurityGroupIngress:
-        - IpProtocol: "tcp"
-          FromPort: "22"
-          ToPort: "22"
-          CidrIp: "0.0.0.0/0"
-        - IpProtocol: "tcp"
-          FromPort: "3001"
-          ToPort: "3001"
-          CidrIp: "0.0.0.0/0"
 
   InvitationSNSTopic:
     Type: "AWS::SNS::Topic"
@@ -321,7 +301,7 @@ Resources:
     Type: "Custom::S3Deployment"
     Properties:
       ServiceToken: !GetAtt S3DeploymentFunction.Arn
-      SrcBucket: "cloud-pong-bucket"
+      SrcBucket: "cloud-pong-bucket-new"
       SrcKey: "frontend/frontend.zip"
       DstBucket: !Ref FrontendBucket
       DstKeyPrefix: ""
@@ -334,7 +314,7 @@ Resources:
     Type: "AWS::Lambda::Function"
     Properties:
       Handler: "index.handler"
-      Role: "arn:aws:iam::463494103018:role/LabRole"
+      Role: "arn:aws:iam::671569503595:role/LabRole"
       Runtime: "python3.8"
       Timeout: 300
       Code:
