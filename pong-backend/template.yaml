@@ -29,15 +29,15 @@ Resources:
     Type: "AWS::DynamoDB::Table"
     Properties:
       TableName: "PongGame"
+      BillingMode: PAY_PER_REQUEST 
       AttributeDefinitions:
         - AttributeName: "gameCode"
           AttributeType: "S"
       KeySchema:
         - AttributeName: "gameCode"
           KeyType: "HASH"
-      ProvisionedThroughput:
-        ReadCapacityUnits: 5
-        WriteCapacityUnits: 5
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
 
   EC2SecurityGroup:
     Type: "AWS::EC2::SecurityGroup"
