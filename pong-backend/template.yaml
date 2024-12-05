@@ -14,22 +14,54 @@ Parameters:
       cd backend
       npm install
       pm2 start server.js
-      pm2 save
-      pm2 startup
+      sudo yum install -y amazon-cloudwatch-agent
+      sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /dev/null << EOF
+      {
+        "agent": {
+          "metrics_collection_interval": 60,
+          "run_as_user": "root"
+        },
+        "metrics": {
+          "namespace": "PongGame",
+          "metrics_collected": {
+            "cpu": {
+              "measurement": [
+                "cpu_usage_idle",
+                "cpu_usage_user",
+                "cpu_usage_system"
+              ],
+              "metrics_collection_interval": 60,
+              "totalcpu": true
+            },
+            "mem": {
+              "measurement": [
+                "mem_used_percent"
+              ],
+              "metrics_collection_interval": 60
+            }
+          }
+        }
+      }
+      EOF
+      sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+        -a fetch-config \
+        -m ec2 \
+        -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json \
+        -s
 
   AllowedSSHIp:
     Type: String
     Description: "The IP address range that can be used to SSH to the EC2 instances"
     Default: "134.41.184.241/32"
-      
-      
+
+
 
 Resources:
   PongGameTable:
     Type: "AWS::DynamoDB::Table"
     Properties:
       TableName: "PongGame"
-      BillingMode: PAY_PER_REQUEST 
+      BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: "gameCode"
           AttributeType: "S"
@@ -38,6 +70,9 @@ Resources:
           KeyType: "HASH"
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: "KMS"
 
   EC2SecurityGroup:
     Type: "AWS::EC2::SecurityGroup"
@@ -56,7 +91,7 @@ Resources:
   EC2Instance:
     Type: "AWS::EC2::Instance"
     Properties:
-      InstanceType: "t2.micro"
+      InstanceType: "t3.small"
       KeyName: "pong-kp"
       ImageId: "ami-0ba9883b710b05ac6"
       SecurityGroups:
@@ -64,6 +99,114 @@ Resources:
       IamInstanceProfile: "LabInstanceProfile"
       UserData:
         Fn::Base64: !Ref UserDataScript
+      BlockDeviceMappings:
+        - DeviceName: "/dev/xvda"
+          Ebs:
+            VolumeSize: 8
+            VolumeType: "gp2"
+            DeleteOnTermination: true
+
+  CloudWatchAlarmTopic:
+    Type: "AWS::SNS::Topic"
+    Properties:
+      DisplayName: "CloudWatchAlarmsTopic"
+
+  CloudWatchAlarmTopicSubscription:
+    Type: "AWS::SNS::Subscription"
+    Properties:
+      Protocol: "email"
+      Endpoint: "mh1377@gmail.com"  # Replace with your email address
+      TopicArn: !Ref CloudWatchAlarmTopic
+
+
+  EC2CPUAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmName: "HighCPUUtilization"
+      AlarmDescription: "Alarm when CPU exceeds 80%"
+      Namespace: "AWS/EC2"
+      MetricName: "CPUUtilization"
+      Dimensions:
+        - Name: "InstanceId"
+          Value: !Ref EC2Instance
+      Statistic: "Average"
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 80
+      ComparisonOperator: "GreaterThanThreshold"
+      AlarmActions:
+        - !Ref CloudWatchAlarmTopic
+
+
+  EC2MemoryAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmName: "HighMemoryUtilization"
+      AlarmDescription: "Alarm when Memory Utilization exceeds 80%"
+      Namespace: "PongGame"
+      MetricName: "mem_used_percent"
+      Dimensions:
+        - Name: "InstanceId"
+          Value: !Ref EC2Instance
+      Statistic: "Average"
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 80
+      ComparisonOperator: "GreaterThanThreshold"
+      AlarmActions:
+        - !Ref CloudWatchAlarmTopic
+
+
+  GuardDutyDetector:
+    Type: "AWS::GuardDuty::Detector"
+    Properties:
+      Enable: true
+      FindingPublishingFrequency: SIX_HOURS
+
+
+  GuardDutySNSTopic:
+    Type: "AWS::SNS::Topic"
+    Properties:
+      DisplayName: "GuardDutyFindings"
+      TopicName: "GuardDutyFindings"
+
+  GuardDutySNSTopicSubscription:
+    Type: "AWS::SNS::Subscription"
+    Properties:
+      Protocol: "email"
+      Endpoint: "mh1377@gmail.com"  # Replace with your email address
+      TopicArn: !Ref GuardDutySNSTopic
+
+
+  GuardDutyEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: "GuardDutyFindingsRule"
+      Description: "Capture GuardDuty findings and send to SNS"
+      EventPattern:
+        source:
+          - "aws.guardduty"
+        detail-type:
+          - "GuardDuty Finding"
+      Targets:
+        - Arn: !Ref GuardDutySNSTopic
+          Id: "GuardDutySNSTarget"
+
+
+  GuardDutySNSTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref GuardDutySNSTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: "Allow_EventBridge_GuardDuty"
+            Effect: "Allow"
+            Principal:
+              Service: "events.amazonaws.com"
+            Action: "SNS:Publish"
+            Resource: !Ref GuardDutySNSTopic
 
   CreateGameFunction:
     Type: "AWS::Lambda::Function"
@@ -284,6 +427,21 @@ Resources:
       WebsiteConfiguration:
         IndexDocument: "index.html"
         ErrorDocument: "index.html"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: "AES256"
+      VersioningConfiguration:
+        Status: "Enabled"
+      LifecycleConfiguration:
+        Rules:
+          - Id: "TransitionNoncurrentVersions"
+            Status: "Enabled"
+            NoncurrentVersionTransitions:
+              - TransitionInDays: 30
+                StorageClass: "STANDARD_IA"
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 365
 
   BucketPolicy:
     Type: "AWS::S3::BucketPolicy"
@@ -404,23 +562,7 @@ Resources:
                   logger.error("Error during S3 Deployment: %s", str(e))
                   send_response(event, context, "FAILED", {"Message": "Deployment failed.", "Error": str(e)})
 
-  GuardDutyDetector:
-    Type: "AWS::GuardDuty::Detector"
-    Properties:
-      Enable: true
-      FindingPublishingFrequency: SIX_HOURS
 
-  GuardDutySNSTopic:
-    Type: "AWS::SNS::Topic"
-    Properties:
-      DisplayName: "GuardDutyFindings"
-
-  GuardDutySNSTopicSubscription:
-    Type: "AWS::SNS::Subscription"
-    Properties:
-      Protocol: "email"
-      Endpoint: "mh1377@gmail.com"
-      TopicArn: !Ref GuardDutySNSTopic
 
 Outputs:
   ApiGatewayUrl:
